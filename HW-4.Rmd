@@ -1,6 +1,6 @@
 ---
 title: "MATH 216 Homework 4"
-author: "WRITE YOUR NAME HERE"
+author: "Alden Cowap"
 output:
   html_document:
     toc: true
@@ -25,8 +25,8 @@ library(broom)
 Please indicate
 
 * Who you collaborated with:
-* Roughly how much time you spent on this HW so far:
-* The URL of the RPubs published URL [here](https://www.nhl.com/).
+* Roughly how much time you spent on this HW so far: 4 hours
+* The URL of the RPubs published URL [here](http://rpubs.com/acowap/HW4).
 * What gave you the most trouble:
 * Any comments you have:
 
@@ -41,29 +41,189 @@ shipping hub in the United States. Where should they build it?
 the color corresponds to the distance of the given area to the shipping hub,
 which is marked on the map with a large red dot.
 
+First, let's make a map that has a blue dot at the center of each county. 
 ```{r, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5}
 # Perform your computations here:
+
+## Get data tables:
+Census_county <- read_csv("Census_county.csv")
+county_shp <- us_counties()
+county_data <- county_shp@data %>% mutate(n=1:3220)
+county_polygon <- tidy(county_shp, region="geoid")
+
+county_centroid <- county_shp %>% sp::coordinates()
+
+centroid <- as.data.frame(county_centroid) %>% 
+  mutate(longitude = V1) %>% 
+  mutate(latitude=V2) %>% 
+  mutate(n=1:3220) %>% 
+  select(longitude, latitude, n)
+
+county_data <- left_join(county_data, centroid, by="n")
+
+counties <- left_join(county_polygon, county_data, by=c("id"="geoid")) %>% 
+  filter( !state_name %in% c("Alaska", "Hawaii", "Puerto Rico")) %>% filter(!is.na(state_name))
+
+pop <- Census_county %>% select(Geo_FIPS, SE_T001_001)
+
+county_pop <- left_join(counties, pop, by=c("id"="Geo_FIPS"))
+
+#trial plot:
+ggplot(counties, aes(x=long, y=lat, group=group)) +
+  geom_path() +
+  coord_map() +
+  geom_point(aes(x=longitude, y=latitude), color = "blue", size = .05)
 
 ```
 
 
-```{r, eval=FALSE, echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5}
-# Here is a template of a ggplot call; feel free to change this to suit your
-# needs. Once your computations above are complete, set the eval=TRUE on the
-# line above to tell R Markdown to run this code block.
-ggplot(data=geo_data, aes(x=long, y=lat, group=group, fill=distance)) +
+First, let's figure out where the middle of the country is by averaging the largest and smallest longitude and latitude and put the hub there. 
+```{r, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5}
+find_hub <- county_pop %>% mutate(pop = SE_T001_001) %>% 
+  select(longitude, latitude, pop, id) %>% 
+  unique() %>% 
+  mutate(n=1:3108)
+
+max_lat <- max(find_hub$latitude)
+min_lat <- min(find_hub$latitude)
+max_long <- max(find_hub$longitude)
+min_long <- min(find_hub$longitude)
+avg_lat <- (max_lat + min_lat)/2
+avg_long <- (max_long + min_long)/2
+
+county_pop_avg <- county_pop %>% 
+  mutate(hub_x_coord = avg_long) %>% 
+  mutate(hub_y_coord = avg_lat) %>% 
+  mutate(distance = (sqrt((longitude - hub_x_coord)^2 + (latitude - hub_y_coord)^2)))
+
+
+ggplot(data=county_pop_avg, aes(x=long, y=lat, group=group, fill=distance)) +
   # Plot choropleth polygons, low -> high being colored white -> dark green
   geom_polygon() +
   scale_fill_gradient(low="white", high="darkgreen") + 
   # Trace outlines of areas
-  geom_path(size=0.1) +
+  geom_path(size=0.1) + 
+  coord_map() +
   # Mark hub
-  annotate("point", x=hub_x_coord, y=hub_y_coord, col="red", size=5) +
-  # Correct aspect ratio for map
-  coord_map()
+  geom_point(aes(x=hub_x_coord, y=hub_y_coord), col="red", size=5) + 
+  labs(title= "Hub at middle of country")
+
+```
+
+While the middle of the country means that no one place in the country is very far from the hub, some parts of the country are more populated than others. If we assume that the company will need to ship items more frequently to more populated areas, we should think more about how far the hub is from places with a lot of people vs. places with few people. 
+
+To do this, we can find the hub most centrally located based on the distance of each county to the hub. Since county lines are roughly drawn by population, where there are more counties, there should be more people. Therfore, the calculated hub placement will be skewed towards where there are more counties, and thus theoretically more people.
+```{r, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5}
+
+#get only unique county centroids
+find_hub <- county_pop %>% mutate(pop = SE_T001_001) %>% 
+  select(longitude, latitude, pop, id) %>% 
+  unique() %>% 
+  mutate(n=1:3108)
+
+
+#make a function that will return the sum of the distances from each county centroid to a specific hub.
+#This function will run through each county centroid as a potential hub. 
+sum_of_dist<- function(hub = 1:3108) {
+  y <- vector()
+  for(i in 1:length(hub)){
+    x <- i
+    y <-c(y, sum((sqrt((find_hub$longitude - find_hub$longitude[x])^2 + (find_hub$latitude - find_hub$latitude[x])^2))))
+  }
+  df <- data.frame(hub, y)
+  colnames(df) <- c("hub", "distance")
+  return(df)
+}
+
+distances2 <- sum_of_dist(1:3108)
+
+#find the hub which is most centrally located by finding the smallest sum 
+
+min_dist_hub <- distances2 %>% arrange(distance) %>% head(1)
+min_dist_obs <- min_dist_hub$hub
+
+#find lat and long of hub
+
+find_hub2 <- find_hub %>% filter(n==min_dist_hub$hub)
+hub_long <- find_hub2$longitude
+hub_lat <- find_hub2$latitude
+
+## mutate data so that we can graph
+
+county_pop_dist <- county_pop %>% 
+  mutate(hub_x_coord = hub_long) %>% 
+  mutate(hub_y_coord = hub_lat) %>% 
+  mutate(distance = (sqrt((longitude - hub_x_coord)^2 + (latitude - hub_y_coord)^2)))
+
+```
+
+```{r, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5}
+# Here is a template of a ggplot call; feel free to change this to suit your
+# needs. Once your computations above are complete, set the eval=TRUE on the
+# line above to tell R Markdown to run this code block.
+ggplot(data=county_pop_dist, aes(x=long, y=lat, group=group, fill=distance)) +
+  # Plot choropleth polygons, low -> high being colored white -> dark green
+  geom_polygon() +
+  scale_fill_gradient(low="white", high="darkgreen") + 
+  # Trace outlines of areas
+  geom_path(size=0.1) + 
+  coord_map() +
+  # Mark hub
+  geom_point(aes(x=hub_x_coord, y=hub_y_coord), col="red", size=5) +
+  labs(title = "Hub by distance")
+```
+
+However, conty lines aren't a very accurate representaion of population. This time, let's weight the distance from each county to the hub by the popultion of the county, so that the number we consider is not just distance, but distance/popultion.
+```{r, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5}
+#find hub placement
+
+#make a function that will return the sum of the distances from each county centroid to a specific hub, wieghted by population of that county.
+#This function will run through each county centroid as a potential hub. 
+sum_of_dist_weight <- function(hub = 1:3108) {
+  y <- vector()
+  for(i in 1:length(hub)){
+    x <- i
+    y <-c(y, sum((sqrt((find_hub$longitude - find_hub$longitude[x])^2 + (find_hub$latitude - find_hub$latitude[x])^2))/find_hub$pop[x]))
+  }
+  df <- data.frame(hub, y)
+  colnames(df) <- c("hub", "distance")
+  return(df)
+}
+
+distances_weight <- sum_of_dist_weight(1:3108)
+
+#find the hub which is most centrally located by finding the smallest sum 
+
+min_weight_hub <- distances_weight %>% arrange(distance) %>% head(1)
+min_weight_obs <- min_weight_hub$hub
+
+#find lat and long of hub
+
+find_hub2 <- find_hub %>% filter(n==min_weight_hub$hub)
+hub_long <- find_hub2$longitude
+hub_lat <- find_hub2$latitude
+
+## mutate data so that we can graph
+
+county_pop_weight <- county_pop %>% 
+  mutate(hub_x_coord = hub_long) %>% 
+  mutate(hub_y_coord = hub_lat) %>% 
+  mutate(distance = (sqrt((longitude - hub_x_coord)^2 + (latitude - hub_y_coord)^2)))
+
+
 ```
 
 
+```{r, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5}
+ggplot(data=county_pop_weight, aes(x=long, y=lat, group=group, fill=distance)) +
+  # Plot choropleth polygons, low -> high being colored white -> dark green
+  geom_polygon() +
+  scale_fill_gradient(low="white", high="darkgreen") + 
+  # Trace outlines of areas
+  geom_path(size=0.1) + 
+  coord_map() +
+  # Mark hub
+  geom_point(aes(x=hub_x_coord, y=hub_y_coord), col="red", size=5) + 
+  labs(title= "Hub by weighted distance")
 
-
-
+```
