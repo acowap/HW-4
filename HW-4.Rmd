@@ -25,7 +25,7 @@ library(broom)
 Please indicate
 
 * Who you collaborated with:
-* Roughly how much time you spent on this HW so far: 4 hours
+* Roughly how much time you spent on this HW so far: 6 hours
 * The URL of the RPubs published URL [here](http://rpubs.com/acowap/HW4).
 * What gave you the most trouble:
 * Any comments you have:
@@ -173,7 +173,7 @@ ggplot(data=county_pop_dist, aes(x=long, y=lat, group=group, fill=distance)) +
   labs(title = "Hub by distance")
 ```
 
-However, conty lines aren't a very accurate representaion of population. This time, let's weight the distance from each county to the hub by the popultion of the county, so that the number we consider is not just distance, but distance/popultion.
+However, county lines aren't a very accurate representaion of population. This time, let's weight the distance from each county to the hub by the popultion of the county, so that the number we consider is not just distance, but distance/popultion.
 ```{r, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5}
 #find hub placement
 
@@ -209,8 +209,6 @@ county_pop_weight <- county_pop %>%
   mutate(hub_x_coord = hub_long) %>% 
   mutate(hub_y_coord = hub_lat) %>% 
   mutate(distance = (sqrt((longitude - hub_x_coord)^2 + (latitude - hub_y_coord)^2)))
-
-
 ```
 
 
@@ -225,5 +223,39 @@ ggplot(data=county_pop_weight, aes(x=long, y=lat, group=group, fill=distance)) +
   # Mark hub
   geom_point(aes(x=hub_x_coord, y=hub_y_coord), col="red", size=5) + 
   labs(title= "Hub by weighted distance")
+
+```
+
+
+While the last map found the best distance by weighting counties by population, the sum of the weights were all different and did not sum to one. In this map, the hub placement is finding the "center of mass" of the country. In order to find the center of mass, I found the center of mass for both longitude and latitude. To find each, the sum of population*latiude (or longitude) was divided by total population. This is a more conventional way of weighting objects because all of the weights sum to 1. 
+```{r, eval=TRUE, echo=FALSE, message=FALSE, warning=FALSE, fig.width=8, fig.height=4.5}
+#Center of mass
+
+find_cm <- find_hub %>% mutate(poplat = pop*latitude) %>% mutate(poplong = pop*longitude)
+
+find_cmna <- find_cm %>% filter(!is.na(pop)) %>% 
+  select(pop, poplat, poplong)
+
+
+findcmna <- colSums(find_cmna)
+
+cm_lat <- findcmna[2]/findcmna[1]
+cm_long <- findcmna[3]/findcmna[1]
+
+county_pop_weight2 <- county_pop %>% 
+  mutate(hub_x_coord = cm_long) %>% 
+  mutate(hub_y_coord = cm_lat) %>% 
+  mutate(distance = (sqrt((longitude - hub_x_coord)^2 + (latitude - hub_y_coord)^2)))
+
+ggplot(data=county_pop_weight2, aes(x=long, y=lat, group=group, fill=distance)) +
+  # Plot choropleth polygons, low -> high being colored white -> dark green
+  geom_polygon() +
+  scale_fill_gradient(low="white", high="darkgreen") + 
+  # Trace outlines of areas
+  geom_path(size=0.1) + 
+  coord_map() +
+  # Mark hub
+  geom_point(aes(x=hub_x_coord, y=hub_y_coord), col="red", size=5) + 
+  labs(title= "Hub by center of mass")
 
 ```
